@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "id": "podushkatools",
+  "version": "1.0.0",
+  "name": "Podushka Tools",
+  "description": "Client-side command button menu for Minecraft Fabric.",
+  "authors": [
+    "semeco"
+  ],
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      {
+        "adapter": "kotlin",
+        "value": "semeco.podushkatools.client.PodushkaToolsClient"
+      }
+    ]
+  },
+  "depends": {
+    "fabricloader": "*",
+    "minecraft": "*",
+    "fabric-api": "*",
+    "fabric-language-kotlin": "*"
+  }
+}
