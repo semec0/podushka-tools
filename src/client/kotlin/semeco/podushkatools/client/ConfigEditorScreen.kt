@@ -6,9 +6,16 @@ import net.minecraft.client.gui.widget.ButtonWidget
 import net.minecraft.client.gui.widget.TextFieldWidget
 import net.minecraft.text.Text
 
-class ConfigEditorScreen : Screen(Text.literal("Podushka Tools Config Editor")) {
+class ConfigEditorScreen(
+    private val requestedPage: Int = 0
+) : Screen(Text.literal("Podushka Tools Config Editor")) {
 
     private lateinit var columnsField: TextFieldWidget
+    private lateinit var saveAndBackButton: ButtonWidget
+
+    private var originalColumns: String = "2"
+    private var pageIndex = 0
+    private var pageCount = 1
 
     override fun init() {
         clearChildren()
@@ -20,6 +27,8 @@ class ConfigEditorScreen : Screen(Text.literal("Podushka Tools Config Editor")) 
 
         val centerX = width / 2
 
+        originalColumns = (config.columns ?: 2).toString()
+
         columnsField = TextFieldWidget(
             textRenderer,
             centerX - 40,
@@ -30,20 +39,38 @@ class ConfigEditorScreen : Screen(Text.literal("Podushka Tools Config Editor")) 
             Text.literal("Columns")
         )
         columnsField.setMaxLength(2)
-        columnsField.setText((config.columns ?: 2).toString())
+        columnsField.setText(originalColumns)
+        columnsField.setChangedListener {
+            updateSaveButtonState()
+        }
         addDrawableChild(columnsField)
 
         val listTop = 78
         val rowHeight = 24
+        val pageSize = calculatePageSize(listTop, rowHeight)
 
-        categories.forEachIndexed { index, category ->
-            val rowY = listTop + index * rowHeight
+        pageCount = if (categories.isEmpty()) {
+            1
+        } else {
+            ((categories.size - 1) / pageSize) + 1
+        }
+
+        pageIndex = requestedPage.coerceIn(0, pageCount - 1)
+
+        val startIndex = pageIndex * pageSize
+        val visibleCategories = categories.drop(startIndex).take(pageSize)
+
+        visibleCategories.forEachIndexed { visibleIndex, category ->
+            val realIndex = startIndex + visibleIndex
+            val rowY = listTop + visibleIndex * rowHeight
             val categoryName = category.name?.takeIf { it.isNotBlank() } ?: "(empty category)"
 
             addDrawableChild(
                 ButtonWidget.builder(Text.literal(categoryName)) {
-                    saveColumnsOnly()
-                    client?.setScreen(CategoryEditScreen(index))
+                    if (hasChanges()) {
+                        saveColumnsOnly()
+                    }
+                    client?.setScreen(CategoryEditScreen(realIndex))
                 }
                     .dimensions(centerX - 170, rowY, 250, 20)
                     .build()
@@ -51,11 +78,37 @@ class ConfigEditorScreen : Screen(Text.literal("Podushka Tools Config Editor")) 
 
             addDrawableChild(
                 ButtonWidget.builder(Text.literal("Del")) {
-                    deleteCategory(index)
+                    deleteCategory(realIndex)
                 }
                     .dimensions(centerX + 88, rowY, 45, 20)
                     .build()
             )
+        }
+
+        if (pageCount > 1) {
+            val previousButton = ButtonWidget.builder(Text.literal("<")) {
+                if (hasChanges()) {
+                    saveColumnsOnly()
+                }
+                client?.setScreen(ConfigEditorScreen(pageIndex - 1))
+            }
+                .dimensions(centerX - 86, height - 84, 50, 20)
+                .build()
+
+            previousButton.active = pageIndex > 0
+            addDrawableChild(previousButton)
+
+            val nextButton = ButtonWidget.builder(Text.literal(">")) {
+                if (hasChanges()) {
+                    saveColumnsOnly()
+                }
+                client?.setScreen(ConfigEditorScreen(pageIndex + 1))
+            }
+                .dimensions(centerX + 36, height - 84, 50, 20)
+                .build()
+
+            nextButton.active = pageIndex < pageCount - 1
+            addDrawableChild(nextButton)
         }
 
         addDrawableChild(
@@ -66,14 +119,15 @@ class ConfigEditorScreen : Screen(Text.literal("Podushka Tools Config Editor")) 
                 .build()
         )
 
-        addDrawableChild(
-            ButtonWidget.builder(Text.literal("Save & Back")) {
-                saveColumnsOnly()
-                client?.setScreen(CommandMenuScreen())
-            }
-                .dimensions(centerX + 10, height - 58, 145, 20)
-                .build()
-        )
+        saveAndBackButton = ButtonWidget.builder(Text.literal("Save & Back")) {
+            saveColumnsOnly()
+            client?.setScreen(CommandMenuScreen())
+        }
+            .dimensions(centerX + 10, height - 58, 145, 20)
+            .build()
+
+        saveAndBackButton.active = false
+        addDrawableChild(saveAndBackButton)
 
         addDrawableChild(
             ButtonWidget.builder(Text.literal("Back")) {
@@ -82,6 +136,23 @@ class ConfigEditorScreen : Screen(Text.literal("Podushka Tools Config Editor")) 
                 .dimensions(centerX - 50, height - 32, 100, 20)
                 .build()
         )
+
+        updateSaveButtonState()
+    }
+
+    private fun calculatePageSize(listTop: Int, rowHeight: Int): Int {
+        val listBottom = height - 94
+        return ((listBottom - listTop) / rowHeight).coerceAtLeast(1)
+    }
+
+    private fun hasChanges(): Boolean {
+        return columnsField.getText() != originalColumns
+    }
+
+    private fun updateSaveButtonState() {
+        if (::saveAndBackButton.isInitialized) {
+            saveAndBackButton.active = hasChanges()
+        }
     }
 
     private fun saveColumnsOnly() {
@@ -100,10 +171,16 @@ class ConfigEditorScreen : Screen(Text.literal("Podushka Tools Config Editor")) 
                 buttonHeight = null
             )
         )
+
+        originalColumns = columns.toString()
+        columnsField.setText(originalColumns)
+        updateSaveButtonState()
     }
 
     private fun addCategory() {
-        saveColumnsOnly()
+        if (hasChanges()) {
+            saveColumnsOnly()
+        }
 
         val old = ConfigManager.config
         val categories = old.categories.orEmpty().toMutableList()
@@ -128,7 +205,9 @@ class ConfigEditorScreen : Screen(Text.literal("Podushka Tools Config Editor")) 
     }
 
     private fun deleteCategory(index: Int) {
-        saveColumnsOnly()
+        if (hasChanges()) {
+            saveColumnsOnly()
+        }
 
         val old = ConfigManager.config
         val categories = old.categories.orEmpty().toMutableList()
@@ -146,7 +225,7 @@ class ConfigEditorScreen : Screen(Text.literal("Podushka Tools Config Editor")) 
             )
         )
 
-        client?.setScreen(ConfigEditorScreen())
+        client?.setScreen(ConfigEditorScreen(pageIndex))
     }
 
     override fun render(context: DrawContext, mouseX: Int, mouseY: Int, delta: Float) {
@@ -179,6 +258,16 @@ class ConfigEditorScreen : Screen(Text.literal("Podushka Tools Config Editor")) 
             62,
             0xFFFFFFFF.toInt()
         )
+
+        if (pageCount > 1) {
+            context.drawCenteredTextWithShadow(
+                textRenderer,
+                Text.literal("${pageIndex + 1} / $pageCount"),
+                centerX,
+                height - 79,
+                0xFFFFFFFF.toInt()
+            )
+        }
     }
 
     override fun shouldPause(): Boolean {

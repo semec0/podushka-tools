@@ -5,7 +5,9 @@ import net.minecraft.client.gui.screen.Screen
 import net.minecraft.client.gui.widget.ButtonWidget
 import net.minecraft.text.Text
 
-class CommandMenuScreen : Screen(Text.literal("Podushka Tools")) {
+class CommandMenuScreen(
+    private val requestedPage: Int = 0
+) : Screen(Text.literal("Podushka Tools")) {
 
     private data class CategoryLabel(
         val name: String,
@@ -14,7 +16,28 @@ class CommandMenuScreen : Screen(Text.literal("Podushka Tools")) {
         val backgroundRight: Int
     )
 
+    private data class PageCategory(
+        val name: String,
+        val buttons: List<ToolButton>
+    )
+
     private val categoryLabels = mutableListOf<CategoryLabel>()
+
+    private var pageIndex = 0
+    private var pageCount = 1
+
+    private val gapX = 8
+    private val gapY = 6
+    private val buttonHeight = 20
+    private val minButtonWidth = 80
+    private val maxButtonWidth = 280
+    private val horizontalScreenPadding = 80
+
+    private val categoryGapTop = 18
+    private val categoryTitleHeight = 12
+    private val categoryGapBottom = 16
+
+    private val contentStartY = 24
 
     override fun init() {
         clearChildren()
@@ -23,61 +46,166 @@ class CommandMenuScreen : Screen(Text.literal("Podushka Tools")) {
         ConfigManager.load()
 
         val config = ConfigManager.config
+        val pages = buildPages(config)
 
-        val maxColumns = (config.columns ?: 2).coerceIn(1, 6)
+        pageCount = pages.size.coerceAtLeast(1)
+        pageIndex = requestedPage.coerceIn(0, pageCount - 1)
+
+        val pageCategories = pages.getOrElse(pageIndex) { listOf() }
+
+        renderPageWidgets(pageCategories, config)
+
+        if (pageCount > 1) {
+            val previousButton = ButtonWidget.builder(Text.literal("<")) {
+                client?.setScreen(CommandMenuScreen(pageIndex - 1))
+            }
+                .dimensions(width / 2 - 86, height - 58, 50, 20)
+                .build()
+
+            previousButton.active = pageIndex > 0
+            addDrawableChild(previousButton)
+
+            val nextButton = ButtonWidget.builder(Text.literal(">")) {
+                client?.setScreen(CommandMenuScreen(pageIndex + 1))
+            }
+                .dimensions(width / 2 + 36, height - 58, 50, 20)
+                .build()
+
+            nextButton.active = pageIndex < pageCount - 1
+            addDrawableChild(nextButton)
+        }
+
+        addDrawableChild(
+            ButtonWidget.builder(Text.literal("Profiles")) {
+                client?.setScreen(ProfilesScreen())
+            }
+                .dimensions(width / 2 - 158, height - 32, 100, 20)
+                .build()
+        )
+
+        addDrawableChild(
+            ButtonWidget.builder(Text.literal("Edit")) {
+                client?.setScreen(ConfigEditorScreen())
+            }
+                .dimensions(width / 2 - 50, height - 32, 100, 20)
+                .build()
+        )
+
+        addDrawableChild(
+            ButtonWidget.builder(Text.literal("Close")) {
+                close()
+            }
+                .dimensions(width / 2 + 58, height - 32, 100, 20)
+                .build()
+        )
+    }
+
+    private fun buildPages(config: ToolConfig): List<List<PageCategory>> {
         val categories = config.categories ?: listOf()
+        val pages = mutableListOf<MutableList<PageCategory>>()
+        pages.add(mutableListOf())
 
-        val gapX = 8
-        val gapY = 6
+        var currentY = contentStartY
 
-        val buttonHeight = 20
-        val minButtonWidth = 80
-        val maxButtonWidth = 280
-        val horizontalScreenPadding = 80
-        val availableWidth = (width - horizontalScreenPadding).coerceAtLeast(minButtonWidth)
-
-        val categoryGapTop = 18
-        val categoryTitleHeight = 12
-        val categoryGapBottom = 16
-
-        var currentY = 24
+        fun startNewPage() {
+            if (pages.last().isNotEmpty()) {
+                pages.add(mutableListOf())
+            }
+            currentY = contentStartY
+        }
 
         categories.forEach { category ->
             val categoryName = category.name?.takeIf { it.isNotBlank() } ?: "Category"
             val buttons = category.buttons ?: listOf()
 
-            val buttonLabels = buttons.map { button ->
-                button.label?.takeIf { it.isNotBlank() } ?: "Button"
+            if (buttons.isEmpty()) {
+                val estimatedHeight = categoryGapTop + categoryTitleHeight + categoryGapBottom
+
+                if (currentY + estimatedHeight > contentBottomY() && pages.last().isNotEmpty()) {
+                    startNewPage()
+                }
+
+                pages.last().add(PageCategory(categoryName, listOf()))
+                currentY += estimatedHeight
+                return@forEach
             }
 
-            val maxTextWidth = buttonLabels
-                .maxOfOrNull { label -> textRenderer.getWidth(label) }
-                ?: 40
+            var remainingButtons = buttons
+            var continuationIndex = 1
 
-            val desiredButtonWidth = (maxTextWidth + 36).coerceIn(minButtonWidth, maxButtonWidth)
+            while (remainingButtons.isNotEmpty()) {
+                val buttonWidth = calculateButtonWidth(remainingButtons)
+                val columns = calculateColumns(remainingButtons.size, buttonWidth)
 
-            var categoryColumns = if (buttons.isEmpty()) {
+                var titleY = currentY + categoryGapTop
+                var buttonsStartY = titleY + categoryTitleHeight + 5
+                var availableHeight = contentBottomY() - buttonsStartY - categoryGapBottom
+
+                if (availableHeight < buttonHeight && pages.last().isNotEmpty()) {
+                    startNewPage()
+
+                    titleY = currentY + categoryGapTop
+                    buttonsStartY = titleY + categoryTitleHeight + 5
+                    availableHeight = contentBottomY() - buttonsStartY - categoryGapBottom
+                }
+
+                val rowsThatFit = ((availableHeight + gapY) / (buttonHeight + gapY)).coerceAtLeast(1)
+                val buttonsThatFit = (rowsThatFit * columns).coerceAtLeast(1)
+
+                val currentChunk = remainingButtons.take(buttonsThatFit)
+                val displayName = if (continuationIndex == 1) {
+                    categoryName
+                } else {
+                    "$categoryName #$continuationIndex"
+                }
+
+                pages.last().add(PageCategory(displayName, currentChunk))
+
+                val usedRows = (currentChunk.size + columns - 1) / columns
+                currentY = buttonsStartY + usedRows * (buttonHeight + gapY) + categoryGapBottom
+
+                remainingButtons = remainingButtons.drop(buttonsThatFit)
+
+                if (remainingButtons.isNotEmpty()) {
+                    continuationIndex++
+                    startNewPage()
+                }
+            }
+        }
+
+        return pages.filter { it.isNotEmpty() }.ifEmpty {
+            listOf(listOf())
+        }
+    }
+
+    private fun renderPageWidgets(pageCategories: List<PageCategory>, config: ToolConfig) {
+        val maxColumns = (config.columns ?: 2).coerceIn(1, 6)
+        val availableWidth = (width - horizontalScreenPadding).coerceAtLeast(minButtonWidth)
+
+        var currentY = contentStartY
+
+        pageCategories.forEach { category ->
+            val categoryName = category.name
+            val buttons = category.buttons
+
+            val buttonWidth = calculateButtonWidth(buttons)
+            val columns = calculateColumns(buttons.size, buttonWidth).coerceAtMost(maxColumns)
+
+            val finalColumns = if (buttons.isEmpty()) {
                 1
             } else {
-                maxColumns.coerceAtMost(buttons.size)
-            }
-
-            while (
-                categoryColumns > 1 &&
-                categoryColumns * desiredButtonWidth + (categoryColumns - 1) * gapX > availableWidth
-            ) {
-                categoryColumns--
+                columns.coerceAtMost(buttons.size)
             }
 
             val maxWidthForCurrentColumns =
-                ((availableWidth - (categoryColumns - 1) * gapX) / categoryColumns)
+                ((availableWidth - (finalColumns - 1) * gapX) / finalColumns)
                     .coerceAtLeast(minButtonWidth)
 
-            val buttonWidth = desiredButtonWidth
+            val finalButtonWidth = buttonWidth
                 .coerceAtMost(maxWidthForCurrentColumns)
                 .coerceAtLeast(minButtonWidth)
 
-            val totalWidth = categoryColumns * buttonWidth + (categoryColumns - 1) * gapX
+            val totalWidth = finalColumns * finalButtonWidth + (finalColumns - 1) * gapX
             val startX = (width - totalWidth) / 2
 
             currentY += categoryGapTop
@@ -97,10 +225,10 @@ class CommandMenuScreen : Screen(Text.literal("Podushka Tools")) {
             val buttonsStartY = currentY + categoryTitleHeight + 5
 
             buttons.forEachIndexed { indexInCategory, toolButton ->
-                val column = indexInCategory % categoryColumns
-                val row = indexInCategory / categoryColumns
+                val column = indexInCategory % finalColumns
+                val row = indexInCategory / finalColumns
 
-                val x = startX + column * (buttonWidth + gapX)
+                val x = startX + column * (finalButtonWidth + gapX)
                 val y = buttonsStartY + row * (buttonHeight + gapY)
 
                 val label = toolButton.label?.takeIf { it.isNotBlank() } ?: "Button"
@@ -111,7 +239,7 @@ class CommandMenuScreen : Screen(Text.literal("Podushka Tools")) {
                         PodushkaToolsClient.sendCommand(command)
                         close()
                     }
-                        .dimensions(x, y, buttonWidth, buttonHeight)
+                        .dimensions(x, y, finalButtonWidth, buttonHeight)
                         .build()
                 )
             }
@@ -119,27 +247,48 @@ class CommandMenuScreen : Screen(Text.literal("Podushka Tools")) {
             val rows = if (buttons.isEmpty()) {
                 0
             } else {
-                (buttons.size + categoryColumns - 1) / categoryColumns
+                (buttons.size + finalColumns - 1) / finalColumns
             }
 
             currentY = buttonsStartY + rows * (buttonHeight + gapY) + categoryGapBottom
         }
+    }
 
-        addDrawableChild(
-            ButtonWidget.builder(Text.literal("Edit")) {
-                client?.setScreen(ConfigEditorScreen())
-            }
-                .dimensions(width / 2 - 104, height - 32, 100, 20)
-                .build()
-        )
+    private fun calculateButtonWidth(buttons: List<ToolButton>): Int {
+        val maxTextWidth = buttons
+            .map { button -> button.label?.takeIf { it.isNotBlank() } ?: "Button" }
+            .maxOfOrNull { label -> textRenderer.getWidth(label) }
+            ?: 40
 
-        addDrawableChild(
-            ButtonWidget.builder(Text.literal("Close")) {
-                close()
-            }
-                .dimensions(width / 2 + 4, height - 32, 100, 20)
-                .build()
-        )
+        return (maxTextWidth + 36).coerceIn(minButtonWidth, maxButtonWidth)
+    }
+
+    private fun calculateColumns(buttonCount: Int, buttonWidth: Int): Int {
+        if (buttonCount <= 0) {
+            return 1
+        }
+
+        val configColumns = (ConfigManager.config.columns ?: 2).coerceIn(1, 6)
+        val availableWidth = (width - horizontalScreenPadding).coerceAtLeast(minButtonWidth)
+
+        var columns = configColumns.coerceAtMost(buttonCount)
+
+        while (
+            columns > 1 &&
+            columns * buttonWidth + (columns - 1) * gapX > availableWidth
+        ) {
+            columns--
+        }
+
+        return columns.coerceAtLeast(1)
+    }
+
+    private fun contentBottomY(): Int {
+        return if (pageCount > 1) {
+            height - 66
+        } else {
+            height - 46
+        }
     }
 
     override fun render(context: DrawContext, mouseX: Int, mouseY: Int, delta: Float) {
@@ -164,6 +313,24 @@ class CommandMenuScreen : Screen(Text.literal("Podushka Tools")) {
                 0xFFFFD966.toInt()
             )
         }
+
+        if (pageCount > 1) {
+            context.drawCenteredTextWithShadow(
+                textRenderer,
+                Text.literal("${pageIndex + 1} / $pageCount"),
+                width / 2,
+                height - 53,
+                0xFFFFFFFF.toInt()
+            )
+        }
+
+        context.drawTextWithShadow(
+            textRenderer,
+            Text.literal("Profile: ${ConfigManager.getActiveProfileName()}"),
+            8,
+            height - 14,
+            0xFFAAAAAA.toInt()
+        )
     }
 
     override fun shouldPause(): Boolean {

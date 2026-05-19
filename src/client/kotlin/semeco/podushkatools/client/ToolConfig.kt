@@ -1,5 +1,9 @@
 package semeco.podushkatools.client
 
+data class ProfileSettings(
+    val activeProfile: String? = "default"
+)
+
 data class ToolConfig(
     val title: String? = null,
     val columns: Int? = 2,

@@ -7,10 +7,16 @@ import net.minecraft.client.gui.widget.TextFieldWidget
 import net.minecraft.text.Text
 
 class CategoryEditScreen(
-    private val categoryIndex: Int
+    private val categoryIndex: Int,
+    private val requestedPage: Int = 0
 ) : Screen(Text.literal("Edit Category")) {
 
     private lateinit var nameField: TextFieldWidget
+    private lateinit var saveAndBackButton: ButtonWidget
+
+    private var originalName: String = ""
+    private var pageIndex = 0
+    private var pageCount = 1
 
     override fun init() {
         clearChildren()
@@ -30,6 +36,8 @@ class CategoryEditScreen(
 
         val centerX = width / 2
 
+        originalName = category.name ?: ""
+
         nameField = TextFieldWidget(
             textRenderer,
             centerX - 150,
@@ -40,19 +48,37 @@ class CategoryEditScreen(
             Text.literal("Category name")
         )
         nameField.setMaxLength(80)
-        nameField.setText(category.name ?: "")
+        nameField.setText(originalName)
+        nameField.setChangedListener {
+            updateSaveButtonState()
+        }
         addDrawableChild(nameField)
 
         val listTop = 78
         val rowHeight = 24
+        val pageSize = calculatePageSize(listTop, rowHeight)
 
-        buttons.forEachIndexed { buttonIndex, toolButton ->
-            val rowY = listTop + buttonIndex * rowHeight
+        pageCount = if (buttons.isEmpty()) {
+            1
+        } else {
+            ((buttons.size - 1) / pageSize) + 1
+        }
+
+        pageIndex = requestedPage.coerceIn(0, pageCount - 1)
+
+        val startIndex = pageIndex * pageSize
+        val visibleButtons = buttons.drop(startIndex).take(pageSize)
+
+        visibleButtons.forEachIndexed { visibleIndex, toolButton ->
+            val buttonIndex = startIndex + visibleIndex
+            val rowY = listTop + visibleIndex * rowHeight
             val label = toolButton.label?.takeIf { it.isNotBlank() } ?: "(empty button)"
 
             addDrawableChild(
                 ButtonWidget.builder(Text.literal(label)) {
-                    saveCategoryName()
+                    if (hasChanges()) {
+                        saveCategoryName()
+                    }
                     client?.setScreen(ButtonEditScreen(categoryIndex, buttonIndex))
                 }
                     .dimensions(centerX - 170, rowY, 250, 20)
@@ -68,6 +94,32 @@ class CategoryEditScreen(
             )
         }
 
+        if (pageCount > 1) {
+            val previousButton = ButtonWidget.builder(Text.literal("<")) {
+                if (hasChanges()) {
+                    saveCategoryName()
+                }
+                client?.setScreen(CategoryEditScreen(categoryIndex, pageIndex - 1))
+            }
+                .dimensions(centerX - 86, height - 84, 50, 20)
+                .build()
+
+            previousButton.active = pageIndex > 0
+            addDrawableChild(previousButton)
+
+            val nextButton = ButtonWidget.builder(Text.literal(">")) {
+                if (hasChanges()) {
+                    saveCategoryName()
+                }
+                client?.setScreen(CategoryEditScreen(categoryIndex, pageIndex + 1))
+            }
+                .dimensions(centerX + 36, height - 84, 50, 20)
+                .build()
+
+            nextButton.active = pageIndex < pageCount - 1
+            addDrawableChild(nextButton)
+        }
+
         addDrawableChild(
             ButtonWidget.builder(Text.literal("Add Button")) {
                 addButton()
@@ -76,14 +128,15 @@ class CategoryEditScreen(
                 .build()
         )
 
-        addDrawableChild(
-            ButtonWidget.builder(Text.literal("Save & Back")) {
-                saveCategoryName()
-                client?.setScreen(ConfigEditorScreen())
-            }
-                .dimensions(centerX + 10, height - 58, 145, 20)
-                .build()
-        )
+        saveAndBackButton = ButtonWidget.builder(Text.literal("Save & Back")) {
+            saveCategoryName()
+            client?.setScreen(ConfigEditorScreen())
+        }
+            .dimensions(centerX + 10, height - 58, 145, 20)
+            .build()
+
+        saveAndBackButton.active = false
+        addDrawableChild(saveAndBackButton)
 
         addDrawableChild(
             ButtonWidget.builder(Text.literal("Back")) {
@@ -92,6 +145,23 @@ class CategoryEditScreen(
                 .dimensions(centerX - 50, height - 32, 100, 20)
                 .build()
         )
+
+        updateSaveButtonState()
+    }
+
+    private fun calculatePageSize(listTop: Int, rowHeight: Int): Int {
+        val listBottom = height - 94
+        return ((listBottom - listTop) / rowHeight).coerceAtLeast(1)
+    }
+
+    private fun hasChanges(): Boolean {
+        return nameField.getText() != originalName
+    }
+
+    private fun updateSaveButtonState() {
+        if (::saveAndBackButton.isInitialized) {
+            saveAndBackButton.active = hasChanges()
+        }
     }
 
     private fun saveCategoryName() {
@@ -103,9 +173,10 @@ class CategoryEditScreen(
         }
 
         val oldCategory = categories[categoryIndex]
+        val newName = nameField.getText()
 
         categories[categoryIndex] = oldCategory.copy(
-            name = nameField.getText()
+            name = newName
         )
 
         ConfigManager.updateConfig(
@@ -116,10 +187,15 @@ class CategoryEditScreen(
                 categories = categories
             )
         )
+
+        originalName = newName
+        updateSaveButtonState()
     }
 
     private fun addButton() {
-        saveCategoryName()
+        if (hasChanges()) {
+            saveCategoryName()
+        }
 
         val old = ConfigManager.config
         val categories = old.categories.orEmpty().toMutableList()
@@ -153,7 +229,9 @@ class CategoryEditScreen(
     }
 
     private fun deleteButton(buttonIndex: Int) {
-        saveCategoryName()
+        if (hasChanges()) {
+            saveCategoryName()
+        }
 
         val old = ConfigManager.config
         val categories = old.categories.orEmpty().toMutableList()
@@ -180,7 +258,7 @@ class CategoryEditScreen(
             )
         )
 
-        client?.setScreen(CategoryEditScreen(categoryIndex))
+        client?.setScreen(CategoryEditScreen(categoryIndex, pageIndex))
     }
 
     override fun render(context: DrawContext, mouseX: Int, mouseY: Int, delta: Float) {
@@ -213,6 +291,16 @@ class CategoryEditScreen(
             62,
             0xFFFFFFFF.toInt()
         )
+
+        if (pageCount > 1) {
+            context.drawCenteredTextWithShadow(
+                textRenderer,
+                Text.literal("${pageIndex + 1} / $pageCount"),
+                centerX,
+                height - 79,
+                0xFFFFFFFF.toInt()
+            )
+        }
     }
 
     override fun shouldPause(): Boolean {

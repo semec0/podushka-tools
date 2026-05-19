@@ -13,6 +13,10 @@ class ButtonEditScreen(
 
     private lateinit var labelField: TextFieldWidget
     private lateinit var commandField: TextFieldWidget
+    private lateinit var saveAndBackButton: ButtonWidget
+
+    private var originalLabel: String = ""
+    private var originalCommand: String = ""
 
     override fun init() {
         clearChildren()
@@ -39,6 +43,9 @@ class ButtonEditScreen(
 
         val centerX = width / 2
 
+        originalLabel = button.label ?: ""
+        originalCommand = button.command ?: ""
+
         labelField = TextFieldWidget(
             textRenderer,
             centerX - 160,
@@ -49,7 +56,10 @@ class ButtonEditScreen(
             Text.literal("Button label")
         )
         labelField.setMaxLength(100)
-        labelField.setText(button.label ?: "")
+        labelField.setText(originalLabel)
+        labelField.setChangedListener {
+            updateSaveButtonState()
+        }
         addDrawableChild(labelField)
 
         commandField = TextFieldWidget(
@@ -62,17 +72,21 @@ class ButtonEditScreen(
             Text.literal("Command")
         )
         commandField.setMaxLength(300)
-        commandField.setText(button.command ?: "")
+        commandField.setText(originalCommand)
+        commandField.setChangedListener {
+            updateSaveButtonState()
+        }
         addDrawableChild(commandField)
 
-        addDrawableChild(
-            ButtonWidget.builder(Text.literal("Save & Back")) {
-                saveButton()
-                client?.setScreen(CategoryEditScreen(categoryIndex))
-            }
-                .dimensions(centerX - 155, height - 32, 145, 20)
-                .build()
-        )
+        saveAndBackButton = ButtonWidget.builder(Text.literal("Save & Back")) {
+            saveButton()
+            client?.setScreen(CategoryEditScreen(categoryIndex))
+        }
+            .dimensions(centerX - 155, height - 32, 145, 20)
+            .build()
+
+        saveAndBackButton.active = false
+        addDrawableChild(saveAndBackButton)
 
         addDrawableChild(
             ButtonWidget.builder(Text.literal("Back")) {
@@ -81,6 +95,19 @@ class ButtonEditScreen(
                 .dimensions(centerX + 10, height - 32, 145, 20)
                 .build()
         )
+
+        updateSaveButtonState()
+    }
+
+    private fun hasChanges(): Boolean {
+        return labelField.getText() != originalLabel ||
+            commandField.getText() != originalCommand
+    }
+
+    private fun updateSaveButtonState() {
+        if (::saveAndBackButton.isInitialized) {
+            saveAndBackButton.active = hasChanges()
+        }
     }
 
     private fun saveButton() {
@@ -98,9 +125,12 @@ class ButtonEditScreen(
             return
         }
 
+        val newLabel = labelField.getText()
+        val newCommand = commandField.getText()
+
         buttons[buttonIndex] = ToolButton(
-            label = labelField.getText(),
-            command = commandField.getText()
+            label = newLabel,
+            command = newCommand
         )
 
         categories[categoryIndex] = category.copy(buttons = buttons)
@@ -113,6 +143,10 @@ class ButtonEditScreen(
                 categories = categories
             )
         )
+
+        originalLabel = newLabel
+        originalCommand = newCommand
+        updateSaveButtonState()
     }
 
     override fun render(context: DrawContext, mouseX: Int, mouseY: Int, delta: Float) {
