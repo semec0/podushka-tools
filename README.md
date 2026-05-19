@@ -1,6 +1,7 @@
 # podushka-tools
 Client-side fabric kotlin mod that adds some tools for personal use.
-## Features:
+## Features
+
 - Command menu
 - Soon there will be more features :D
 
